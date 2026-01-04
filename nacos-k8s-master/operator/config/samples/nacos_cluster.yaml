@@ -1,0 +1,23 @@
+apiVersion: nacos.io/v1alpha1
+kind: Nacos
+metadata:
+  name: nacos
+spec:
+  type: cluster
+  image: crpi-rlo3wv5p9a1d385b.cn-beijing.personal.cr.aliyuncs.com/my_public_base/nacos_nacos-server:2.0.3
+  replicas: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      cpu: 2
+      memory: 2Gi
+  database:
+    type: embedded
+  # 启动数据卷，不然重启后数据丢失
+  volume:
+    enabled: true
+    requests:
+      storage: 1Gi
+    storageClass: nfs-client

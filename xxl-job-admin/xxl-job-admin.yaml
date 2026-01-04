@@ -1,0 +1,92 @@
+#xxl-job-admin部署，使用ingress暴露
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: xxl-job-admin
+  name: xxl-job-admin
+  namespace: xxl-job
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 2
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: xxl-job-admin
+  strategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app: xxl-job-admin
+    spec:
+      containers:
+        - env:
+            - name: PARAMS
+              value: >-
+                --spring.datasource.url=jdbc:mysql://rm-2ze8v2181jtank0w1.rwlb.rds.aliyuncs.com:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai
+                --spring.datasource.username=test_rds_app
+                --spring.datasource.password=DBpwd01test
+          image: >-
+            crpi-rlo3wv5p9a1d385b.cn-beijing.personal.cr.aliyuncs.com/my_public_base/xuxueli_xxl-job-admin:3.2.0
+          imagePullPolicy: IfNotPresent
+          name: xxl-job-admin
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            limits:
+              cpu: '2'
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: xxl-job-admin-service
+  namespace: xxl-job
+spec:
+  selector:
+    app: xxl-job-admin
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+  
+---
+# Ingress（如果需要外部访问）
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: xxl-job-admin-ingress
+  namespace: xxl-job
+spec:
+  rules:
+  - host: test.aladdinedu.com
+    http:
+      paths:
+      - path: /xxl-job-admin
+        pathType: Prefix
+        backend:
+          service:
+            name: xxl-job-admin-service
+            port:
+              number: 8080
+  tls:
+    - hosts:
+        - test.aladdinedu.com
+      secretName: secret1760683736706
