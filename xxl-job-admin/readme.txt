@@ -23,11 +23,11 @@ crpi-rlo3wv5p9a1d385b.cn-beijing.personal.cr.aliyuncs.com/my_public_base/xuxueli
 #报错连接拒绝，验证容器内访问mysql，修改为一行。
 
 #3.2、将docker形式修改为deployment形式
-见"xxl-job-admin.yaml"
+见"xxl-job-admin.yaml"（#该部署在docker部署基础上，增加ingress访问）
+优化版见"xxl-job-admin-update.yaml"（该部署在xxl-job-admin.yaml基础上进行优化：变量修改为配置文件形式，保护敏感信息，日志持久化，参数优化，添加探针。）
 
 #4、验证运行情况
 sudo nerdctl logs -f xxl-job-admin
 https://test.aladdinedu.com/xxl-job-admin/
 admin/123456（默认,登录后修改）
-admin/Asje287642
-
+创建其他管理员账号

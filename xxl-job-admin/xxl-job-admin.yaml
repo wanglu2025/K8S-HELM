@@ -1,4 +1,4 @@
-#xxl-job-admin部署，使用ingress暴露
+#该部署在docker部署基础上，增加ingress访问。
 ---
 apiVersion: apps/v1
 kind: Deployment

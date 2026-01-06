@@ -1,0 +1,236 @@
+# 说明：以下适用于阿里云生产环境。本次采用2副本，去掉log的持久化存储逻辑，使用sls进行日志存储。
+
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: xxl-job-admin
+  namespace: xxl-job
+  labels:
+    app: xxl-job-admin
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: xxl-job-admin
+  template:
+    metadata:
+      labels:
+        app: xxl-job-admin
+    spec:
+      volumes:
+        - name: config-volume
+          configMap:
+            name: xxl-job-config
+            items:
+              - key: application.properties
+                path: application.properties
+            defaultMode: 420
+#        - name: logs-volume
+#          persistentVolumeClaim:
+#            claimName: xxl-job-logs-shared
+      containers:
+        - name: xxl-job-admin
+          image: >-
+            crpi-rlo3wv5p9a1d385b.cn-beijing.personal.cr.aliyuncs.com/my_public_base/xuxueli_xxl-job-admin:3.2.0
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: MYSQL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: xxl-job-secret
+                  key: mysql-username
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: xxl-job-secret
+                  key: mysql-password
+            - name: ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: xxl-job-secret
+                  key: access-token
+          resources:
+            limits:
+              cpu: '2'
+              memory: 2Gi
+            requests:
+              cpu: 500m
+              memory: 1Gi
+          volumeMounts:
+            - name: config-volume
+              readOnly: true
+              mountPath: /application.properties
+              subPath: application.properties
+#            - name: logs-volume
+#              mountPath: /data/applogs
+          livenessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 60
+            timeoutSeconds: 5
+            periodSeconds: 30
+            successThreshold: 1
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 30
+            timeoutSeconds: 3
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 2
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
+      maxSurge: 0
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: xxl-job-admin-service
+  namespace: xxl-job
+spec:
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 8080
+  selector:
+    app: xxl-job-admin
+  type: ClusterIP
+
+---
+kind: Ingress
+apiVersion: networking.k8s.io/v1
+metadata:
+  name: xxl-job-admin-ingress
+  namespace: xxl-job
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - aladdinedu.com
+      secretName: tls
+  rules:
+    - host: aladdinedu.com
+      http:
+        paths:
+          - path: /xxl-job-admin
+            pathType: Prefix
+            backend:
+              service:
+                name: xxl-job-admin-service
+                port:
+                  number: 8080
+
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: xxl-job-config
+  namespace: xxl-job
+data:
+  application.properties: >+
+
+    ### xxl-job, datasource
+
+    spring.datasource.url=jdbc:mysql://rm-2ze08ce254b53fs72.mysql.rds.aliyuncs.com:3306/xxl_job?useUnicode=true&characterEncoding=UTF-8&autoReconnect=true&serverTimezone=Asia/Shanghai
+
+    spring.datasource.username=${MYSQL_USERNAME}
+
+    spring.datasource.password=${MYSQL_PASSWORD}
+
+    spring.datasource.driver-class-name=com.mysql.cj.jdbc.Driver
+
+
+
+    ### 默认为空，建议开启保证安全性；
+
+    xxl.job.accessToken=${ACCESS_TOKEN}
+
+
+    ### 调度中心通讯超时时间[选填]，单位秒；默认3s；
+
+    xxl.job.timeout=3
+
+    ### 调度中心国际化配置 [必填]： 默认为 "zh_CN"/中文简体, 可选范围为 "zh_CN"/中文简体, "zh_TC"/中文繁体 and
+    "en"/英文；
+
+    xxl.job.i18n=zh_CN
+
+    ## 调度线程池最大线程配置【建议显性配置】
+
+    xxl.job.triggerpool.fast.max=300
+
+    xxl.job.triggerpool.slow.max=200
+
+    ### 调度中心日志表数据保存天数 [默认可能是永久保存，建议配置]：过期日志自动清理；限制大于等于7时生效，否则, 如-1，关闭自动清理功能；
+
+    xxl.job.logretentiondays=30
+
+
+    ### web
+
+    #server.port=8080
+
+    #server.servlet.context-path=/xxl-job-admin  #前端地址路径
+
+---
+kind: Secret
+apiVersion: v1
+metadata:
+  name: tls
+  namespace: xxl-job
+immutable: false
+data:
+  tls.crt: >-
+    LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUdCekNDQk8rZ0F3SUJBZ0lRQVFEUlc1UHY1UnVQdE5Gb3JCQlVGekFOQmdrcWhraUc5dzBCQVFzRkFEQnUKTVFzd0NRWURWUVFHRXdKVlV6RVZNQk1HQTFVRUNoTU1SR2xuYVVObGNuUWdTVzVqTVJrd0Z3WURWUVFMRXhCMwpkM2N1WkdsbmFXTmxjblF1WTI5dE1TMHdLd1lEVlFRREV5UkZibU55ZVhCMGFXOXVJRVYyWlhKNWQyaGxjbVVnClJGWWdWRXhUSUVOQklDMGdSekl3SGhjTk1qVXdPREU0TURBd01EQXdXaGNOTWpZd09ERTNNak0xT1RVNVdqQWIKTVJrd0Z3WURWUVFEREJBcUxtRnNZV1JrYVc1bFpIVXVZMjl0TUlJQklqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQwpBUThBTUlJQkNnS0NBUUVBcFVBSzRyMWJYWVE5K0NvdFllOEwyMUhaWUpDNHh2cElkTmI3Y21pbWt4RlRvT2tJCm1YeVRNbld4dExOQnZRRU9WbXlZZzJXcjlmbXNmL3RGdWd1cEFsV3l5bnNlRWloSldONmJhZjRZbi9QOHlQTnoKUlNxa1JUZXhVNXltVUs2NlYvWm5ZcE5FTnIwaUFvRzh2WVczdHcwMFh5SlBZTmd3RnViK3NGYldVWVh2c3RUVQpXWkZnY1RnZmlwZ2N1Tk41bUY4WFlGbjVjWGF3cVZjSERFZTVRVEcrdGVtelo3Lysyak1CVFdMcWRRc2RuUGRiCm5qTW1yekRZSG1YV0tWVzZRYVdMWEpnSFM3WW93OE41d3RsTUlvTitoaW5PalZJRHBSUzd5aFBMRGVpdllYN0wKNEtLcE9scGl1K1lKaXFOUDhTTG1vZXAvSzBQdzhNT09iVHNSQVFJREFRQUJvNElDOGpDQ0F1NHdId1lEVlIwagpCQmd3Rm9BVWVOK1JrRi91M3F6MnhYWHIxVXhWVSs4a1NyWXdIUVlEVlIwT0JCWUVGQzRocGk3eEk2dHVlY3diCmREOUJZOEdtbS9lUU1Dc0dBMVVkRVFRa01DS0NFQ291WVd4aFpHUnBibVZrZFM1amIyMkNEbUZzWVdSa2FXNWwKWkhVdVkyOXRNRDRHQTFVZElBUTNNRFV3TXdZR1o0RU1BUUlCTUNrd0p3WUlLd1lCQlFVSEFnRVdHMmgwZEhBNgpMeTkzZDNjdVpHbG5hV05sY25RdVkyOXRMME5RVXpBT0JnTlZIUThCQWY4RUJBTUNCYUF3SFFZRFZSMGxCQll3CkZBWUlLd1lCQlFVSEF3RUdDQ3NHQVFVRkJ3TUNNSUdBQmdnckJnRUZCUWNCQVFSME1ISXdKQVlJS3dZQkJRVUgKTUFHR0dHaDBkSEE2THk5dlkzTndMbVJwWjJsalpYSjBMbU52YlRCS0JnZ3JCZ0VGQlFjd0FvWSthSFIwY0RvdgpMMk5oWTJWeWRITXVaR2xuYVdObGNuUXVZMjl0TDBWdVkzSjVjSFJwYjI1RmRtVnllWGRvWlhKbFJGWlVURk5EClFTMUhNaTVqY25Rd0RBWURWUjBUQVFIL0JBSXdBRENDQVgwR0Npc0dBUVFCMW5rQ0JBSUVnZ0Z0QklJQmFRRm4KQUhZQTEyMTlFTkduOVhmQ3grbGYxd0MvK1lMSk0xcGw0ZEN6QVhNWHdNakZhWGNBQUFHWXV2M3B1UUFBQkFNQQpSekJGQWlFQTdVS1pOVkZkczkxQjRpN0c5QVZTY1UwWUxlSVlzYjRpZ2dIQWJVNU9kYzBDSUZEYU1wSDZNbGRqCkFwVTBQNXd2ZzlLaE5tdEhlVmV0V09SMVhCVUM4cjdiQUhZQXdqRitWMFVabzBYdWZ6amVzcEJCNjhmQ0lWb2kKdjMvVnRhMTJtdGtPVXMwQUFBR1l1djNxQWdBQUJBTUFSekJGQWlBNnE1cTNKdVVIU1R2eTN2K1dtWUpwK3Z4ego2UWt3aTFTNDVmdE5ER2NLQndJaEFJZnVYaUtoV244NnhUUUpxeDc4dGpvUHcwZ0hVeDl1bjJZWHE2M3FSZUpMCkFIVUFsRTVEaC9yc3dlK0I4eGtrSnFnWVpRSEgwMTg0QWdFL2NtZDlWVGN1R2RnQUFBR1l1djNxQ1FBQUJBTUEKUmpCRUFpQTZUZlFOWVpMWHoydU04cTZHWmxjYzgwVGR0cmJGQ1F3UVFMZjJ0djdZZ1FJZ1NlTWMraS95VXRXOQp5eUxmR09FRzY3Z0duZDNwT2plUElGOUxVSmg1ek1jd0RRWUpLb1pJaHZjTkFRRUxCUUFEZ2dFQkFKclJqSnltCk9pcE5BbEw3ZVJ6N3FwN2huc3hQMjhpd2ZpdVh1c012anYzY2E1TkNwUm5ubmlVZ3RMSm82U25xUGowY2tIYkYKcW5xeVozVFJYL2MvMDdSTXRhb0JpcXpWd0JhdCtHUWFqVndPU05Fd2h6T3RaWEtmd0dacFRIS01yWERQc2IwSgpSb1V6VnJWK3l5RjNlbERQUUErY05Wb2Q1b0V5cnlRS3FWWHpxdkZOdmlqNW9ZNmxDeHR1TDZON0VJd3VwclRhCkV5ZGQzTmJaK3pDczBXaUFZRzVhK1FiTEhuYTVRN0NudDFMOUFtQzEvK3ppZGgxYTl4V1owV0d6Y2tKalhKNnEKUk1FdUNqQjZjR0d2R212RkhQMGVva2xGUjFPcGlCa1BEbTBwSmNSS3A1Vk5TQk9lYjJxSFJldjhXNlZ5Y1kxVQphL1J1bWEzbkZEblZjSDQ9Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0KLS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUVxakNDQTVLZ0F3SUJBZ0lRRGVEL3RlNWl5MkVRbjJDTW5PMWUwekFOQmdrcWhraUc5dzBCQVFzRkFEQmgKTVFzd0NRWURWUVFHRXdKVlV6RVZNQk1HQTFVRUNoTU1SR2xuYVVObGNuUWdTVzVqTVJrd0Z3WURWUVFMRXhCMwpkM2N1WkdsbmFXTmxjblF1WTI5dE1TQXdIZ1lEVlFRREV4ZEVhV2RwUTJWeWRDQkhiRzlpWVd3Z1VtOXZkQ0JICk1qQWVGdzB4TnpFeE1qY3hNalEyTkRCYUZ3MHlOekV4TWpjeE1qUTJOREJhTUc0eEN6QUpCZ05WQkFZVEFsVlQKTVJVd0V3WURWUVFLRXd4RWFXZHBRMlZ5ZENCSmJtTXhHVEFYQmdOVkJBc1RFSGQzZHk1a2FXZHBZMlZ5ZEM1agpiMjB4TFRBckJnTlZCQU1USkVWdVkzSjVjSFJwYjI0Z1JYWmxjbmwzYUdWeVpTQkVWaUJVVEZNZ1EwRWdMU0JICk1qQ0NBU0l3RFFZSktvWklodmNOQVFFQkJRQURnZ0VQQURDQ0FRb0NnZ0VCQU84VWY0NmkvbnI3cGtnVERxbkUKZVNJZkNGcXZQblVxM2FGMXRNSjVoaDlNbk82TG10NVVkSGZCR3dDOVNpK1hqSzEyY2paZ3hPYnNMNlJnMW5qdgpOaEFNSjRKdW5OMEpHR1JKR1NldmJKc0Ezc2M2OG5iUFF6dUtwNUpjOHZwcnlwMm10czM4cFNDWG9yUFIrc2NoClFpc0tBN09TUTFNamNGTjBkN3RicmNlV0ZOYnpnTDJjc0pWUWVvZ09CR1NlL0taRUladzZnWExLZUZlN211cG4KTllKUk9pMmlDMTErSHVGNzlpQXR0TWMzMkN2NlVPeGl4WS8zWlYrTHpwTG5rbEZxOThYT1Jnd2tJSkwxSHV2UApoYTh5dmIrVzZKaXNsWkpMK0hMRnRpZG94bUk3UW0zWnlJVjY2VzUzM0RzR0ZpbUZKa3ozeTBHZUhXdVNWTWJJCmxmc0NBd0VBQWFPQ0FVOHdnZ0ZMTUIwR0ExVWREZ1FXQkJSNDM1R1FYKzdlclBiRmRldlZURlZUN3lSS3RqQWYKQmdOVkhTTUVHREFXZ0JST0lsUWdHSlhtNDI3bUQvcjZ1Ukx0QmhlUE9UQU9CZ05WSFE4QkFmOEVCQU1DQVlZdwpIUVlEVlIwbEJCWXdGQVlJS3dZQkJRVUhBd0VHQ0NzR0FRVUZCd01DTUJJR0ExVWRFd0VCL3dRSU1BWUJBZjhDCkFRQXdOQVlJS3dZQkJRVUhBUUVFS0RBbU1DUUdDQ3NHQVFVRkJ6QUJoaGhvZEhSd09pOHZiMk56Y0M1a2FXZHAKWTJWeWRDNWpiMjB3UWdZRFZSMGZCRHN3T1RBM29EV2dNNFl4YUhSMGNEb3ZMMk55YkRNdVpHbG5hV05sY25RdQpZMjl0TDBScFoybERaWEowUjJ4dlltRnNVbTl2ZEVjeUxtTnliREJNQmdOVkhTQUVSVEJETURjR0NXQ0dTQUdHCi9Xd0JBakFxTUNnR0NDc0dBUVVGQndJQkZoeG9kSFJ3Y3pvdkwzZDNkeTVrYVdkcFkyVnlkQzVqYjIwdlExQlQKTUFnR0JtZUJEQUVDQVRBTkJna3Foa2lHOXcwQkFRc0ZBQU9DQVFFQW9CczFlQ0xLYWtMdFZSUEZSakJJSjlMSgpMMHM4Wld1bThVOC8xVE1Wa1FNQm4rQ1BiNXhuQ0QwR1NBNkwvVjBaRnJNTnFCaXJycjVCMjQxT2VzRUN2eElpCjk4Ylo5MGg5K3EvWDVlTXlPRDM1ZjhZVGFFTXBkblFDbmF3SXdpSHgwNi8wQmZpVGorYi9YUWloK21xdDNaWGUKeE5DSnFLZXhkaUIySVdHU0tjZ2FoUGFjV2trL0JBUUZpc0tJRllFcUh6Vjk3NFMzRkF6LzhMSWZENTh4bnNFTgpHZnp5SURrSDNKcndZWjhjYVBUZjZaWDlNMUdySVNOOEhuV1R0ZE5DSDJ4RWFqUmEvaDlaQlhqVXlGS1FyR2syCm4yaGNMcmZaU2J5bkVDL3BTdy9FVDdINW5Xd2Nram1BSjFsOWZjbmJxa1UvcGY2dU1RbW5mbDBKUWpKTlNnPT0KLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQotLS0tLUJFR0lOIENFUlRJRklDQVRFLS0tLS0KTUlJRWZqQ0NBMmFnQXdJQkFnSVFEK0F5cTRSTkF6RUd4UXlPRThpd2FEQU5CZ2txaGtpRzl3MEJBUXNGQURCaApNUXN3Q1FZRFZRUUdFd0pWVXpFVk1CTUdBMVVFQ2hNTVJHbG5hVU5sY25RZ1NXNWpNUmt3RndZRFZRUUxFeEIzCmQzY3VaR2xuYVdObGNuUXVZMjl0TVNBd0hnWURWUVFERXhkRWFXZHBRMlZ5ZENCSGJHOWlZV3dnVW05dmRDQkQKUVRBZUZ3MHlOREF4TVRnd01EQXdNREJhRncwek1URXhNRGt5TXpVNU5UbGFNR0V4Q3pBSkJnTlZCQVlUQWxWVApNUlV3RXdZRFZRUUtFd3hFYVdkcFEyVnlkQ0JKYm1NeEdUQVhCZ05WQkFzVEVIZDNkeTVrYVdkcFkyVnlkQzVqCmIyMHhJREFlQmdOVkJBTVRGMFJwWjJsRFpYSjBJRWRzYjJKaGJDQlNiMjkwSUVjeU1JSUJJakFOQmdrcWhraUcKOXcwQkFRRUZBQU9DQVE4QU1JSUJDZ0tDQVFFQXV6Zk5OTng3YThteWFKQ3RTblgvUnJvaENnaU45UmxVeWZ1SQoyL091OGpxSmtUeDY1cXNHR212UHJDM29YZ2trUkxwaW1uN1dvNmgrNEZSMUlBV3NVTGVjWXhwc01OemFIeG14CjF4N2UvZGZneTVTRE42N3NIME5PM1hzczByMHVwUy9rcWJpdE90U1pwTFlsNlp0ckFHQ1NZUDlQSVVrWTkyZVEKcTJFR25JL3l1dW0wNlpJeWE3WHpWK2hkRzgyTUhhdVZCSlZKOHpVdGx1TkpiZDEzNC90SlM3U3NWUWVwajVXegp0Q083VEcxRjhQYXBzcFV3dFAxTVZZd25TbGNVZklLZHpYT1MweFpLQmd5TVVOR1BIZ20rRjZIbUljcjlnK1VRCnZJT2xDc1JuS1BaekZCUTlSbmJEaHhTSklUUk5ydzlGREtaSm9icTduTVd4TTRNcGhRSURBUUFCbzRJQk1EQ0MKQVN3d0R3WURWUjBUQVFIL0JBVXdBd0VCL3pBZEJnTlZIUTRFRmdRVVRpSlVJQmlWNXVOdTVnLzYrcmtTN1FZWApqemt3SHdZRFZSMGpCQmd3Rm9BVUE5NVFOVmJSVEx0bThLUGlHeHZEbDdJOTBWVXdEZ1lEVlIwUEFRSC9CQVFECkFnR0dNSFFHQ0NzR0FRVUZCd0VCQkdnd1pqQWpCZ2dyQmdFRkJRY3dBWVlYYUhSMGNEb3ZMMjlqYzNBdVpHbG4KYVdObGNuUXVZMjR3UHdZSUt3WUJCUVVITUFLR00yaDBkSEE2THk5allXTmxjblJ6TG1ScFoybGpaWEowTG1OdQpMMFJwWjJsRFpYSjBSMnh2WW1Gc1VtOXZkRU5CTG1OeWREQkFCZ05WSFI4RU9UQTNNRFdnTTZBeGhpOW9kSFJ3Ck9pOHZZM0pzTG1ScFoybGpaWEowTG1OdUwwUnBaMmxEWlhKMFIyeHZZbUZzVW05dmRFTkJMbU55YkRBUkJnTlYKSFNBRUNqQUlNQVlHQkZVZElBQXdEUVlKS29aSWh2Y05BUUVMQlFBRGdnRUJBSFJCbDNqTjcrWEhCVUswZFpudQpoTWRvTndEMW5DUk9VM0JUSWgxVE56UkkwYlEwbTUrQy9kQ1J6emxxb1NBRkhVbE9pK09pRGx0V2tYVHptUW42Clo4Ykg1UEZCeTVzWXBjLzhjTlBvU3poeXFjcHZ2RVp2di9JdmMwVXArZHptYTd2QkRKQzlXck1SVVVsU0ZTUXAKa2RYU21waEROa1hKc2dBUm14emMxOElONkxZTVJpT1dsWTdSRTJGOTAwcFBXNjBCdkpISE5DWDBiYlNSai9RbApibVZxOHd1ZnRCRCsrRCtSUzhLKyt1anBNakZCUk95V2ZCWCt3b1FER3NNYXprbWd1bFFkblpyZGo0NzZlbE9MCmF4UnZyU2dFb3JqdTFrSk03TTY1ejJSVVpyZnpRWVcvMXJzOG1SVVhpbjZpRXRhZC9SdjFaSTFXR1ltV1B5Qm0KcGJvPQotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0t
+  tls.key: >-
+    LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlFcEFJQkFBS0NBUUVBcFVBSzRyMWJYWVE5K0NvdFllOEwyMUhaWUpDNHh2cElkTmI3Y21pbWt4RlRvT2tJCm1YeVRNbld4dExOQnZRRU9WbXlZZzJXcjlmbXNmL3RGdWd1cEFsV3l5bnNlRWloSldONmJhZjRZbi9QOHlQTnoKUlNxa1JUZXhVNXltVUs2NlYvWm5ZcE5FTnIwaUFvRzh2WVczdHcwMFh5SlBZTmd3RnViK3NGYldVWVh2c3RUVQpXWkZnY1RnZmlwZ2N1Tk41bUY4WFlGbjVjWGF3cVZjSERFZTVRVEcrdGVtelo3Lysyak1CVFdMcWRRc2RuUGRiCm5qTW1yekRZSG1YV0tWVzZRYVdMWEpnSFM3WW93OE41d3RsTUlvTitoaW5PalZJRHBSUzd5aFBMRGVpdllYN0wKNEtLcE9scGl1K1lKaXFOUDhTTG1vZXAvSzBQdzhNT09iVHNSQVFJREFRQUJBb0lCQUJQQnpldGcvMWoxZENGRgpEYXI5VlJvU05aNmxmdW9QUjNWc3RLQnZvYWJJdGdweGdoMHp0emVidWJUa2o3SUV1ODJhYXp1ZWZzcElZUmJtCkdHYVBlVlAxb2d3eVh4eUZvNHRVQmhuTWp1NGswaTdHYUp3MjVtLytJaDNnaDBQek9BVkhTUUlRb0dHNUNDVnIKbElER1NYcEJ3bWF6Wi9Fb3Q4c3RML3N1VHE1dFZ2bXVXTEZ6RkVYK01iV2ZIYS9lTlRlWjNKeXFjMFAwT0tPMgpKbkVJdE5xdU9kTkQ3TVVrMWF0VVNRSFhJZi8rQkQ1ZDUvZktaSVlKZk1FS1FqcU9tRXRBUFRmVzlGL2lHaHBGCnRBM3NkTldTQ1JkbGw4V01MMGdVR3M5WWZoYkJMc0VHK0NUNmZmNktGanhEbE1HY0g2K1REOTN6NExuRXRmVmwKbFZSLzFrOENnWUVBNkNjTUhGNmM4c0pmakZoYzdvZWVXNEZYNDJ3TWcreU5yYTJ1K1R1VSt4RHRQNitRKzBCLwpRVmg5MjBpOGlveFByN215UHJOMDh0NkxscGRkRWtDbDJWbkdaZTJ2LzBKZE9IcmhSMWNmdWtjb1hnQm1XMVI0CnNibGUySjNXeTdFUUpkUC9yK1hBam96TWtXWUppL0hHUFJjSTN2Z1FMOFN1eG03REhDd055K2NDZ1lFQXRqbW4KSnduWUlKdWFkWkdqZWFISUd2R0FnYVdnZHN2b0Q2VkRRYVNlZlhQNkx4ZnVvZi9sY2VwQ1I1MzFNMXRrc2JmZwpmVG9mcXlLQklMVXV5VmFtVjk1dHJaTDRiUGNOVGNkNkU5b252enkwdFRiU2hjcVphMlZxcmphaVpZa2oxRWhiCkRPTW90WG5aSWpQNFpFVXR1dzVxNE5VaWlxM1BMd3V5RzdSS1h0Y0NnWUFHckhpd3FCZWk4dXVFUVZZS2xXTjgKQmUvYzNkSk9TSkthRjVBY0loWmFVVlpBcW05a2lhb2Uyc2hqY1dmYUk4WjJxc1B4QVgrdks2NmZtYUpYVC94MApqeHdnK2dCQk9rc3J3SHlSYkhQQkN5S2g4U2tBSHlHSkdtY2JtdzM5dFExZHlRWmtyQm9vL3VzeWt0aGJhWXZsClhiQW5tTUgrWFkwWXJ6NTBwTitRcVFLQmdRQ014SjdHdm9rU0w0SXpubTBkc2dlR0lOZTN6MzNWSjVHK1BGbG4KWlViMS9Oamc5bWpuQm1wMkJKUnRCSzM5blhWOUFHSFArMDJwZ3o4alNETzdYMCtqQTNYUXAzOTNsYVhXVnVtTQpXbk5uL1BwUUh1aWthQ3o2Vk44RGM3c2lHcjN0NkhORjBsbUpUM2FZUUhONjZpSDRwWnVVMGJFY1ZrWjl2bGc1CnBKM3JBd0tCZ1FET1RtR2Y0bytBNzRENW94dVJwbzVXOVk1Rm12UkFNNmRPMTdmV3Awdzk4dm9pZzIrcWEvZTEKMEpFN0w2QkRhcU5zWnJGV2VWL1Nmb2dCV2dVTFg4a1IyQjBrZGhuNkFkUnZFSk1uVE5HS3RaMlhFamZ2RktMdwpLcXdJOVJxV1J5Q1VEMUV6QjZ0dDZ6Z3dEblZoSGJSQk9kMjQyT3VLcjZ3NnlVSFpaWnJtbEE9PQotLS0tLUVORCBSU0EgUFJJVkFURSBLRVktLS0tLQ==
+type: kubernetes.io/tls
+
+---
+kind: Secret
+apiVersion: v1
+metadata:
+  name: xxl-job-secret
+  namespace: xxl-job
+stringData:
+  access-token: Job@Secure2026!prod9jwew
+  mysql-username: prod_rds_app
+  mysql-password: ACRpwd01Aladdin
+type: Opaque
+
+---
+#apiVersion: v1
+#kind: PersistentVolumeClaim
+#metadata:
+#  labels:
+#    app: xxl-job-admin
+#    component: logs
+#  name: xxl-job-logs-shared
+#  namespace: xxl-job
+#spec:
+#  accessModes:
+#    - ReadWriteMany
+#  resources:
+#    requests:
+#      storage: 20Gi
+#  storageClassName: nfs-client
+#  volumeMode: Filesystem
+
+
